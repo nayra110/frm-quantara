@@ -3,193 +3,456 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Avatar VRM x Groq</title>
+    <title>VRM Avatar AI dengan Groq</title>
     <style>
-        body { margin: 0; background-color: #1a1a1a; color: white; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-        canvas { display: block; }
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Arial', sans-serif;
+            overflow: hidden;
+        }
         
-        #ui-layer {
-            position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
-            width: 90%; max-width: 600px; background: rgba(0, 0, 0, 0.7);
-            padding: 20px; border-radius: 15px; backdrop-filter: blur(10px);
-            border: 1px solid rgba(255,255,255,0.1); box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        #container {
+            width: 100vw;
+            height: 100vh;
+            position: relative;
         }
-
-        #response-text { margin-bottom: 15px; font-style: italic; color: #ffabf1; min-height: 20px; text-align: center; }
         
-        .input-group { display: flex; gap: 10px; }
-        input { 
-            flex: 1; padding: 12px; border-radius: 8px; border: none; 
-            background: #333; color: white; outline: none;
+        #chat-container {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            right: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            max-width: 500px;
+            background: rgba(0, 0, 0, 0.7);
+            border-radius: 10px;
+            padding: 20px;
+            color: white;
+            z-index: 1000;
         }
-        button { 
-            padding: 10px 20px; border-radius: 8px; border: none; 
-            background: #ff4081; color: white; cursor: pointer; font-weight: bold;
-            transition: 0.3s;
+        
+        #messages {
+            height: 200px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            padding: 10px;
         }
-        button:hover { background: #f50057; transform: scale(1.05); }
-        button:disabled { background: #555; }
+        
+        .message {
+            padding: 8px 12px;
+            border-radius: 15px;
+            max-width: 80%;
+            word-wrap: break-word;
+        }
+        
+        .user-message {
+            background: #007bff;
+            align-self: flex-end;
+        }
+        
+        .ai-message {
+            background: #28a745;
+            align-self: flex-start;
+        }
+        
+        #input-area {
+            display: flex;
+            gap: 10px;
+        }
+        
+        #user-input {
+            flex: 1;
+            padding: 10px;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+        }
+        
+        #send-btn {
+            padding: 10px 20px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        
+        #send-btn:hover {
+            background: #0056b3;
+        }
+        
+        #send-btn:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+        }
+        
+        #status {
+            text-align: center;
+            font-size: 14px;
+            color: #ffc107;
+        }
+        
+        #loading {
+            display: none;
+            text-align: center;
+            margin-top: 10px;
+        }
+        
+        #error-message {
+            color: #dc3545;
+            text-align: center;
+            margin-top: 10px;
+            display: none;
+        }
     </style>
 </head>
 <body>
-
-    <div id="ui-layer">
-        <div id="response-text">Halo! Ketik sesuatu untuk mulai mengobrol.</div>
-        <div class="input-group">
-            <input type="text" id="userInput" placeholder="Tanya sesuatu ke Groq AI...">
-            <button id="sendBtn">Kirim</button>
+    <div id="container">
+        <div id="chat-container">
+            <div id="messages"></div>
+            <div id="input-area">
+                <input type="text" id="user-input" placeholder="Ketik pesan Anda..." onkeypress="handleKeyPress(event)">
+                <button id="send-btn" onclick="sendMessage()">Kirim</button>
+            </div>
+            <div id="status">Memuat avatar...</div>
+            <div id="loading">AI sedang berpikir...</div>
+            <div id="error-message"></div>
         </div>
     </div>
 
+    <!-- Import library yang diperlukan -->
     <script type="importmap">
-    {
-        "imports": {
-            "three": "https://unpkg.com/three@0.154.0/build/three.module.js",
-            "three/addons/": "https://unpkg.com/three@0.154.0/examples/jsm/",
-            "@pixiv/three-vrm": "https://unpkg.com/@pixiv/three-vrm@2.0.2/lib/three-vrm.module.js"
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.128.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.128.0/examples/jsm/",
+                "@pixiv/three-vrm": "https://unpkg.com/@pixiv/three-vrm@3.1.2/lib/three-vrm.module.js"
+            }
         }
-    }
-<script type="module">
+    </script>
+
+    <script type="module">
         import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
         import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
         import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
 
-        // --- KONFIGURASI GROQ ---
-        const GROQ_API_KEY = "MASUKKAN_API_KEY_KAMU_DISINI";
-
-        // --- SETUP SCENE ---
+        // Konfigurasi
+        const GROQ_API_KEY = 'YOUR_GROQ_API_KEY'; // Ganti dengan API key Anda
+        const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
+        
+        // State
+        let currentVRM = null;
+        let mixer = null;
+        let clock = new THREE.Clock();
+        let isModelLoading = false;
+        
+        // Inisialisasi Three.js
         const scene = new THREE.Scene();
-        const camera = new THREE.PerspectiveCamera(35, window.innerWidth / window.innerHeight, 0.1, 20);
-        camera.position.set(0, 1.4, 1.5); // Sedikit lebih jauh agar terlihat
-
-        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        scene.background = new THREE.Color(0x87CEEB); // Sky blue
+        
+        const camera = new THREE.PerspectiveCamera(30, window.innerWidth / window.innerHeight, 0.1, 20);
+        camera.position.set(0.0, 1.0, 5.0);
+        
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.setPixelRatio(window.devicePixelRatio);
-        document.body.appendChild(renderer.domElement);
-
-        const light = new THREE.DirectionalLight(0xffffff, 1.0);
-        light.position.set(1, 1, 1).normalize();
-        scene.add(light);
-        scene.add(new THREE.AmbientLight(0xffffff, 0.7));
-
-        // --- LOAD MODEL ---
-        let currentVrm = null;
-        const loader = new GLTFLoader();
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.outputEncoding = THREE.sRGBEncoding;
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.0;
+        document.getElementById('container').appendChild(renderer.domElement);
         
-        // Register VRM Plugin
-        loader.register((parser) => {
-            return new VRMLoaderPlugin(parser);
-        });
-
-        loader.load(
-            './model/model.vrm', 
-            (gltf) => {
+        // Controls
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.screenSpacePanning = true;
+        controls.target.set(0.0, 1.0, 0.0);
+        controls.maxPolarAngle = Math.PI / 2;
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        
+        // Lights
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+        scene.add(ambientLight);
+        
+        // Main directional light
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
+        directionalLight.position.set(1.0, 2.0, 1.0);
+        directionalLight.castShadow = true;
+        directionalLight.shadow.mapSize.width = 1024;
+        directionalLight.shadow.mapSize.height = 1024;
+        directionalLight.shadow.camera.near = 0.5;
+        directionalLight.shadow.camera.far = 5.0;
+        directionalLight.shadow.camera.left = -2;
+        directionalLight.shadow.camera.right = 2;
+        directionalLight.shadow.camera.top = 2;
+        directionalLight.shadow.camera.bottom = -2;
+        scene.add(directionalLight);
+        
+        // Fill light from behind
+        const backLight = new THREE.DirectionalLight(0xffffff, 0.5);
+        backLight.position.set(-1.0, 1.0, -1.0);
+        scene.add(backLight);
+        
+        // Ground grid
+        const gridHelper = new THREE.GridHelper(10, 20, 0x888888, 0x444444);
+        gridHelper.position.y = 0;
+        scene.add(gridHelper);
+        
+        // Simple floor for shadows
+        const floorGeometry = new THREE.PlaneGeometry(10, 10);
+        const floorMaterial = new THREE.ShadowMaterial({ opacity: 0.3 });
+        const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+        floor.rotation.x = -Math.PI / 2;
+        floor.position.y = 0;
+        floor.receiveShadow = true;
+        scene.add(floor);
+        
+        // Load VRM Model from local file
+        async function loadVRM() {
+            if (isModelLoading) return;
+            isModelLoading = true;
+            
+            const statusEl = document.getElementById('status');
+            const errorEl = document.getElementById('error-message');
+            
+            statusEl.textContent = 'Memuat avatar...';
+            errorEl.style.display = 'none';
+            
+            // Gunakan GLTFLoader untuk memuat file VRM
+            const loader = new GLTFLoader();
+            
+            // Daftarkan plugin VRM
+            loader.register(parser => {
+                return new VRMLoaderPlugin(parser);
+            });
+            
+            try {
+                // Path ke file VRM lokal
+                const modelUrl = 'model/model.vrm'; // Sesuaikan dengan path file Anda
+                
+                console.log('Mencoba memuat model dari:', modelUrl);
+                
+                // Load model
+                const gltf = await loader.loadAsync(modelUrl);
+                
+                // Dapatkan VRM instance
                 const vrm = gltf.userData.vrm;
                 
-                // PENTING: Hapus VRMUtils.removeUnusedVertices jika error
-                // VRMUtils.rotateVRM0(vrm); // Opsional jika model terbalik
-
-                currentVrm = vrm;
-                scene.add(vrm.scene);
-                vrm.scene.rotation.y = Math.PI; // Putar agar hadap kamera
+                if (!vrm) {
+                    throw new Error('File bukan format VRM yang valid');
+                }
                 
-                console.log("VRM Berhasil Dimuat!", vrm);
-            },
-            (progress) => console.log('Loading...', (progress.loaded / progress.total * 100).toFixed(2), '%'),
-            (error) => console.error("Gagal muat model:", error)
-        );
-
-        // --- ANIMASI LOOP ---
-        const clock = new THREE.Clock();
-        function animate() {
-            requestAnimationFrame(animate);
-            const delta = clock.getDelta();
-            if (currentVrm) {
-                currentVrm.update(delta);
-            }
-            renderer.render(scene, camera);
-        }
-        animate();
-
-        // --- FUNGSI BICARA & LIP-SYNC ---
-        function speak(text) {
-            const synth = window.speechSynthesis;
-            const utter = new SpeechSynthesisUtterance(text);
-            utter.lang = 'id-ID';
-
-            utter.onstart = () => {
-                const moveMouth = setInterval(() => {
-                    if (!synth.speaking) {
-                        if(currentVrm) currentVrm.expressionManager.setValue("aa", 0);
-                        clearInterval(moveMouth);
-                        return;
+                // Rotasi model agar berdiri tegak
+                VRMUtils.rotateVRM0(vrm);
+                
+                // Setup scene
+                scene.add(vrm.scene);
+                currentVRM = vrm;
+                
+                // Setup animations
+                setupAnimations(vrm);
+                
+                console.log('VRM model berhasil dimuat');
+                statusEl.textContent = 'Avatar siap!';
+                
+                // Update shadow
+                vrm.scene.traverse((obj) => {
+                    if (obj.isMesh) {
+                        obj.castShadow = true;
+                        obj.receiveShadow = true;
                     }
-                    // Menggunakan ekspresi "aa" untuk buka mulut
-                    if(currentVrm) currentVrm.expressionManager.setValue("aa", Math.random() * 0.7);
-                }, 120);
-            };
-
-            synth.speak(utter);
-        }
-
-        // --- KONEKSI GROQ AI ---
-        async function chat() {
-            const input = document.getElementById('userInput');
-            const btn = document.getElementById('sendBtn');
-            const responseDiv = document.getElementById('response-text');
-            const query = input.value;
-
-            if (!query || !GROQ_API_KEY.startsWith("gsk")) {
-                alert("Isi pesan dan pastikan API Key Groq sudah benar!");
-                return;
+                });
+                
+            } catch (error) {
+                console.error('Error loading VRM:', error);
+                statusEl.textContent = 'Gagal memuat avatar';
+                errorEl.style.display = 'block';
+                errorEl.textContent = 'Error: ' + error.message + '. Pastikan file model.vrm ada di folder model/';
+            } finally {
+                isModelLoading = false;
             }
+        }
+        
+        // Setup animations
+        function setupAnimations(vrm) {
+            // Simple idle animation
+            const idleAnimation = () => {
+                if (!vrm) return;
+                
+                const time = Date.now() / 1000;
+                
+                // Slight body sway
+                if (vrm.humanoid) {
+                    const hips = vrm.humanoid.getNormalizedBoneNode('hips');
+                    if (hips) {
+                        hips.rotation.y = Math.sin(time * 0.5) * 0.02;
+                    }
+                    
+                    // Small breathing motion
+                    const chest = vrm.humanoid.getNormalizedBoneNode('chest');
+                    if (chest) {
+                        chest.position.y = Math.sin(time * 2) * 0.01;
+                    }
+                }
+            };
             
-            btn.disabled = true;
-            responseDiv.innerText = "Si bot sedang berpikir...";
-
+            // Add to animation loop
+            mixer = { update: idleAnimation };
+        }
+        
+        // Animation functions
+        function startTalking() {
+            if (!currentVRM || !currentVRM.humanoid) return;
+            
+            // Simple talking animation
+            const mouth = currentVRM.humanoid.getNormalizedBoneNode('jaw');
+            if (mouth) {
+                mouth.rotation.x = 0.2;
+            }
+        }
+        
+        function stopTalking() {
+            if (!currentVRM || !currentVRM.humanoid) return;
+            
+            const mouth = currentVRM.humanoid.getNormalizedBoneNode('jaw');
+            if (mouth) {
+                mouth.rotation.x = 0;
+            }
+        }
+        
+        function nodHead() {
+            if (!currentVRM || !currentVRM.humanoid) return;
+            
+            const head = currentVRM.humanoid.getNormalizedBoneNode('head');
+            if (head) {
+                head.rotation.x = -0.2;
+                setTimeout(() => {
+                    if (head) head.rotation.x = 0;
+                }, 500);
+            }
+        }
+        
+        // AI Functions
+        async function getAIResponse(userMessage) {
+            const loadingEl = document.getElementById('loading');
+            const sendBtn = document.getElementById('send-btn');
+            
+            loadingEl.style.display = 'block';
+            sendBtn.disabled = true;
+            startTalking();
+            
             try {
-                const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-                    method: "POST",
+                const response = await fetch(GROQ_API_URL, {
+                    method: 'POST',
                     headers: {
-                        "Authorization": `Bearer ${GROQ_API_KEY}`,
-                        "Content-Type": "application/json"
+                        'Authorization': `Bearer ${GROQ_API_KEY}`,
+                        'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({
-                        model: "llama3-8b-8192",
+                        model: 'mixtral-8x7b-32768',
                         messages: [
-                            { role: "system", content: "Kamu adalah asisten AI yang ramah. Jawab dengan singkat." },
-                            { role: "user", content: query }
-                        ]
+                            {
+                                role: 'system',
+                                content: 'Anda adalah asisten AI yang ramah dan membantu. Berikan jawaban dalam bahasa Indonesia.'
+                            },
+                            {
+                                role: 'user',
+                                content: userMessage
+                            }
+                        ],
+                        temperature: 0.7,
+                        max_tokens: 1024
                     })
                 });
-
-                const data = await res.json();
-                const reply = data.choices[0].message.content;
                 
-                responseDiv.innerText = reply;
-                speak(reply);
-
-            } catch (err) {
-                responseDiv.innerText = "Koneksi bermasalah.";
-                console.error(err);
+                const data = await response.json();
+                
+                if (data.choices && data.choices.length > 0) {
+                    return data.choices[0].message.content;
+                } else {
+                    throw new Error('No response from API');
+                }
+            } catch (error) {
+                console.error('Error calling Groq API:', error);
+                return 'Maaf, terjadi kesalahan saat memproses pesan Anda.';
             } finally {
-                btn.disabled = false;
-                input.value = "";
+                loadingEl.style.display = 'none';
+                sendBtn.disabled = false;
+                stopTalking();
+                nodHead(); // Nod after responding
             }
         }
-
-        document.getElementById('sendBtn').onclick = chat;
         
-        // Handle input Enter
-        document.getElementById('userInput').addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') chat();
-        });
-
-        window.onresize = () => {
-            renderer.setSize(window.innerWidth, window.innerHeight);
+        // Chat functions
+        function addMessage(text, isUser) {
+            const messagesDiv = document.getElementById('messages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${isUser ? 'user-message' : 'ai-message'}`;
+            messageDiv.textContent = text;
+            messagesDiv.appendChild(messageDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+        
+        async function sendMessage() {
+            const input = document.getElementById('user-input');
+            const message = input.value.trim();
+            
+            if (!message) return;
+            
+            addMessage(message, true);
+            input.value = '';
+            
+            const response = await getAIResponse(message);
+            addMessage(response, false);
+        }
+        
+        function handleKeyPress(event) {
+            if (event.key === 'Enter') {
+                sendMessage();
+            }
+        }
+        
+        // Animation loop
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            const delta = clock.getDelta();
+            
+            if (currentVRM) {
+                currentVRM.update(delta);
+            }
+            
+            if (mixer) {
+                mixer.update();
+            }
+            
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        
+        // Handle window resize
+        window.addEventListener('resize', onWindowResize, false);
+        function onWindowResize() {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
-        };
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+        
+        // Initialize
+        loadVRM();
+        animate();
+        
+        // Export functions to global scope
+        window.sendMessage = sendMessage;
+        window.handleKeyPress = handleKeyPress;
     </script>
 </body>
 </html>
