@@ -2,13 +2,15 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <title>VRM Web Viewer - Eye Tracking</title>
+    <title>VRM Web Viewer - Eye & Physics</title>
     <style>
-        body { margin: 0; background-color: #1a1a1a; overflow: hidden; }
+        body { margin: 0; background-color: #1a1a1a; overflow: hidden; font-family: sans-serif; }
         canvas { display: block; }
+        #info { position: absolute; top: 10px; left: 10px; color: white; pointer-events: none; }
     </style>
 </head>
 <body>
+<div id="info">Gunakan Mouse untuk Putar Kamera (Physics & Eye Tracking Aktif)</div>
 
 <script type="importmap">
   {
@@ -26,20 +28,21 @@
     import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
     import { VRMLoaderPlugin } from '@pixiv/three-vrm';
 
-    // --- 1. SETUP SCENE ---
+    // --- 1. SETUP SCENE & RENDERER ---
     const scene = new THREE.Scene();
-    const clock = new THREE.Clock(); // Penting untuk animasi & lookAt
+    const clock = new THREE.Clock();
     
-    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 20.0);
-    camera.position.set(0, 1.4, 2.5);
+    const camera = new THREE.PerspectiveCamera(35, window.innerWidth / window.innerHeight, 0.1, 20.0);
+    camera.position.set(0, 1.4, 3.5);
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
     document.body.appendChild(renderer.domElement);
 
-    // --- 2. LIGHTING ---
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+    // --- 2. LIGHTING (Agar tekstur VRoid terlihat cerah) ---
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
     scene.add(ambientLight);
 
     const dirLight = new THREE.DirectionalLight(0xffffff, 1.0);
@@ -48,11 +51,11 @@
 
     // --- 3. CONTROLS ---
     const controls = new OrbitControls(camera, renderer.domElement);
-    controls.screenSpacePanning = true;
+    controls.enableDamping = true; // Membuat putaran kamera lebih halus
+    controls.dampingFactor = 0.05;
     controls.target.set(0, 1.3, 0);
-    controls.update();
 
-    // --- 4. LOAD VRM ---
+    // --- 4. LOAD VRM MODEL ---
     let currentVrm = null;
     const loader = new GLTFLoader();
     
@@ -62,44 +65,47 @@
     });
 
     loader.load(
-        'model/model.vrm', // Ganti dengan path file .vrm milikmu
+        'model/model.vrm', // GANTI DENGAN PATH FILE KAMU
         (gltf) => {
             const vrm = gltf.userData.vrm;
             currentVrm = vrm;
             
-            // Masukkan model ke scene
+            // Tambahkan model ke scene
             scene.add(vrm.scene);
 
-            // MEMBUAT MATA MENGIKUTI KAMERA
+            // 1. AKTIFKAN EYE TRACKING
             vrm.lookAt.target = camera;
 
-            // Opsional: Memutar model agar menghadap depan jika terbalik
+            // 2. HADAPKAN KE DEPAN (Karena default VRM biasanya membelakangi kamera)
             vrm.scene.rotation.y = Math.PI; 
 
-            console.log("Model Loaded!", vrm);
+            console.log("VRM Model Loaded!", vrm);
         },
-        (progress) => {
-            console.log('Loading...', (progress.loaded / progress.total * 100) + '%');
-        },
-        (error) => console.error('Error:', error)
+        (progress) => console.log('Loading...', (progress.loaded / progress.total * 100) + '%'),
+        (error) => console.error('Gagal memuat model:', error)
     );
 
     // --- 5. ANIMATION LOOP ---
     function animate() {
         requestAnimationFrame(animate);
 
-        // Ambil delta time (selisih waktu antar frame)
         const deltaTime = clock.getDelta();
+        const elapsedTime = clock.getElapsedTime();
 
         if (currentVrm) {
-            // Update fitur VRM (LookAt, SpringBone, Expression, dll)
+            // Memberikan sedikit goyangan 'idle' agar rambut/rok tidak kaku
+            // Math.sin memberikan gerakan ayunan halus secara otomatis
+            currentVrm.scene.position.y = Math.sin(elapsedTime * 0.5) * 0.005;
+
+            // PENTING: Update semua state VRM (Physics, Mata, Ekspresi)
             currentVrm.update(deltaTime);
         }
 
+        controls.update();
         renderer.render(scene, camera);
     }
 
-    // Handle Resize
+    // --- 6. HANDLE WINDOW RESIZE ---
     window.addEventListener('resize', () => {
         camera.aspect = window.innerWidth / window.innerHeight;
         camera.updateProjectionMatrix();
