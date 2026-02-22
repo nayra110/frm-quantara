@@ -188,7 +188,7 @@
             "imports": {
                 "three": "https://unpkg.com/three@0.128.0/build/three.module.js",
                 "three/addons/": "https://unpkg.com/three@0.128.0/examples/jsm/",
-                "@pixiv/three-vrm": "https://unpkg.com/@pixiv/three-vrm@0.6.11/lib/three-vrm.module.js"
+                "@pixiv/three-vrm": "https://unpkg.com/@pixiv/three-vrm@2.0.2/lib/three-vrm.module.js"
             }
         }
     </script>
@@ -197,10 +197,12 @@
         import * as THREE from 'three';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
         import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-        import * as VRM from '@pixiv/three-vrm';
+        
+        // Import VRM dengan cara yang benar
+        import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
 
         // Konfigurasi
-        const GROQ_API_KEY = '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'; // Ganti dengan API key Anda
+        const GROQ_API_KEY = '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';
         const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
         
         // State
@@ -209,6 +211,7 @@
         let isModelLoading = false;
         let talkingAnimation = null;
         let idleAnimation = null;
+        let modelUrl = 'model/model.vrm'; // Ubah sesuai path file VRM Anda
         
         // Inisialisasi Three.js
         const scene = new THREE.Scene();
@@ -282,7 +285,7 @@
         const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.6);
         scene.add(hemiLight);
         
-        // Load VRM Model from local file
+        // Load VRM Model
         async function loadVRM() {
             if (isModelLoading) return;
             isModelLoading = true;
@@ -297,18 +300,12 @@
             // Gunakan GLTFLoader untuk memuat file VRM
             const loader = new GLTFLoader();
             
-            // Daftarkan plugin VRM dengan cara yang benar
+            // Daftarkan plugin VRM
             loader.register((parser) => {
-                return new VRM.VRMLoaderPlugin(parser, {
-                    helperRoot: scene,
-                    autoUpdateHumanBones: true
-                });
+                return new VRMLoaderPlugin(parser);
             });
             
             try {
-                // Path ke file VRM lokal
-                const modelUrl = 'model/model.vrm';
-                
                 console.log('Mencoba memuat model dari:', modelUrl);
                 modelInfoEl.textContent = 'Loading: ' + modelUrl;
                 
@@ -322,8 +319,10 @@
                     throw new Error('File bukan format VRM yang valid');
                 }
                 
+                console.log('VRM model berhasil dimuat:', vrm);
+                
                 // Rotasi model agar berdiri tegak
-                VRM.VRMUtils.rotateVRM0(vrm);
+                VRMUtils.rotateVRM0(vrm);
                 
                 // Setup scene
                 scene.add(vrm.scene);
@@ -337,9 +336,8 @@
                     }
                 });
                 
-                console.log('VRM model berhasil dimuat');
                 statusEl.textContent = 'Avatar siap!';
-                modelInfoEl.textContent = 'Model: ' + (vrm.meta?.title || 'Unknown') + ' by ' + (vrm.meta?.author || 'Unknown');
+                modelInfoEl.textContent = 'Model berhasil dimuat';
                 
                 // Setup idle animation
                 setupIdleAnimation();
@@ -348,7 +346,7 @@
                 console.error('Error loading VRM:', error);
                 statusEl.textContent = 'Gagal memuat avatar';
                 errorEl.style.display = 'block';
-                errorEl.textContent = 'Error: ' + error.message + '. Pastikan file model.vrm ada di folder model/';
+                errorEl.textContent = 'Error: ' + error.message + '. Pastikan file ' + modelUrl + ' ada dan formatnya benar.';
                 modelInfoEl.textContent = 'Error loading model';
             } finally {
                 isModelLoading = false;
@@ -489,6 +487,10 @@
                     })
                 });
                 
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
                 const data = await response.json();
                 
                 if (data.choices && data.choices.length > 0) {
@@ -498,7 +500,7 @@
                 }
             } catch (error) {
                 console.error('Error calling Groq API:', error);
-                return 'Maaf, terjadi kesalahan saat memproses pesan Anda.';
+                return 'Maaf, terjadi kesalahan saat memproses pesan Anda. Error: ' + error.message;
             } finally {
                 loadingEl.style.display = 'none';
                 sendBtn.disabled = false;
@@ -574,7 +576,7 @@
         window.sendMessage = sendMessage;
         window.handleKeyPress = handleKeyPress;
         
-        console.log('Aplikasi siap. Menunggu model VRM...');
+        console.log('Aplikasi siap. Mencoba memuat model dari:', modelUrl);
     </script>
 </body>
 </html>
