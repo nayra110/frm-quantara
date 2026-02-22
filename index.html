@@ -32,6 +32,7 @@
             padding: 20px;
             color: white;
             z-index: 1000;
+            backdrop-filter: blur(10px);
         }
         
         #messages {
@@ -41,6 +42,22 @@
             flex-direction: column;
             gap: 10px;
             padding: 10px;
+            scrollbar-width: thin;
+            scrollbar-color: #888 #333;
+        }
+        
+        #messages::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        #messages::-webkit-scrollbar-track {
+            background: #333;
+            border-radius: 4px;
+        }
+        
+        #messages::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 4px;
         }
         
         .message {
@@ -48,6 +65,12 @@
             border-radius: 15px;
             max-width: 80%;
             word-wrap: break-word;
+            animation: fadeIn 0.3s ease-in;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
         }
         
         .user-message {
@@ -71,6 +94,18 @@
             border: none;
             border-radius: 5px;
             font-size: 16px;
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        #user-input::placeholder {
+            color: rgba(255, 255, 255, 0.5);
+        }
+        
+        #user-input:focus {
+            outline: none;
+            border-color: #007bff;
         }
         
         #send-btn {
@@ -81,15 +116,18 @@
             border-radius: 5px;
             cursor: pointer;
             font-size: 16px;
+            transition: all 0.3s ease;
         }
         
         #send-btn:hover {
             background: #0056b3;
+            transform: scale(1.05);
         }
         
         #send-btn:disabled {
             background: #6c757d;
             cursor: not-allowed;
+            transform: none;
         }
         
         #status {
@@ -102,6 +140,7 @@
             display: none;
             text-align: center;
             margin-top: 10px;
+            color: #17a2b8;
         }
         
         #error-message {
@@ -109,6 +148,22 @@
             text-align: center;
             margin-top: 10px;
             display: none;
+            padding: 10px;
+            background: rgba(220, 53, 69, 0.2);
+            border-radius: 5px;
+        }
+        
+        #model-info {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 12px;
+            z-index: 1000;
+            backdrop-filter: blur(5px);
         }
     </style>
 </head>
@@ -124,6 +179,7 @@
             <div id="loading">AI sedang berpikir...</div>
             <div id="error-message"></div>
         </div>
+        <div id="model-info"></div>
     </div>
 
     <!-- Import library yang diperlukan -->
@@ -132,7 +188,7 @@
             "imports": {
                 "three": "https://unpkg.com/three@0.128.0/build/three.module.js",
                 "three/addons/": "https://unpkg.com/three@0.128.0/examples/jsm/",
-                "@pixiv/three-vrm": "https://unpkg.com/@pixiv/three-vrm@3.1.2/lib/three-vrm.module.js"
+                "@pixiv/three-vrm": "https://unpkg.com/@pixiv/three-vrm@0.6.11/lib/three-vrm.module.js"
             }
         }
     </script>
@@ -149,56 +205,63 @@
         
         // State
         let currentVRM = null;
-        let mixer = null;
         let clock = new THREE.Clock();
         let isModelLoading = false;
+        let talkingAnimation = null;
+        let idleAnimation = null;
         
         // Inisialisasi Three.js
         const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x87CEEB); // Sky blue
+        scene.background = new THREE.Color(0x87CEEB);
         
         const camera = new THREE.PerspectiveCamera(30, window.innerWidth / window.innerHeight, 0.1, 20);
-        camera.position.set(0.0, 1.0, 5.0);
+        camera.position.set(0.0, 1.2, 5.0);
         
-        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.setPixelRatio(window.devicePixelRatio);
         renderer.shadowMap.enabled = true;
         renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-        renderer.outputEncoding = THREE.sRGBEncoding;
         renderer.toneMapping = THREE.ACESFilmicToneMapping;
-        renderer.toneMappingExposure = 1.0;
+        renderer.toneMappingExposure = 1.2;
         document.getElementById('container').appendChild(renderer.domElement);
         
         // Controls
         const controls = new OrbitControls(camera, renderer.domElement);
         controls.screenSpacePanning = true;
-        controls.target.set(0.0, 1.0, 0.0);
+        controls.target.set(0.0, 1.2, 0.0);
         controls.maxPolarAngle = Math.PI / 2;
+        controls.minDistance = 3;
+        controls.maxDistance = 8;
         controls.enableDamping = true;
         controls.dampingFactor = 0.05;
         
         // Lights
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
         scene.add(ambientLight);
         
         // Main directional light
-        const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
-        directionalLight.position.set(1.0, 2.0, 1.0);
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 1.2);
+        directionalLight.position.set(2.0, 3.0, 2.0);
         directionalLight.castShadow = true;
         directionalLight.shadow.mapSize.width = 1024;
         directionalLight.shadow.mapSize.height = 1024;
         directionalLight.shadow.camera.near = 0.5;
-        directionalLight.shadow.camera.far = 5.0;
-        directionalLight.shadow.camera.left = -2;
-        directionalLight.shadow.camera.right = 2;
-        directionalLight.shadow.camera.top = 2;
-        directionalLight.shadow.camera.bottom = -2;
+        directionalLight.shadow.camera.far = 10.0;
+        directionalLight.shadow.camera.left = -3;
+        directionalLight.shadow.camera.right = 3;
+        directionalLight.shadow.camera.top = 3;
+        directionalLight.shadow.camera.bottom = -3;
         scene.add(directionalLight);
         
-        // Fill light from behind
-        const backLight = new THREE.DirectionalLight(0xffffff, 0.5);
-        backLight.position.set(-1.0, 1.0, -1.0);
+        // Fill light
+        const fillLight = new THREE.DirectionalLight(0xffeedd, 0.5);
+        fillLight.position.set(-2.0, 1.0, 2.0);
+        scene.add(fillLight);
+        
+        // Back light
+        const backLight = new THREE.DirectionalLight(0xffffff, 0.4);
+        backLight.position.set(0.0, 1.0, -3.0);
         scene.add(backLight);
         
         // Ground grid
@@ -215,6 +278,10 @@
         floor.receiveShadow = true;
         scene.add(floor);
         
+        // Soft lighting helper
+        const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.6);
+        scene.add(hemiLight);
+        
         // Load VRM Model from local file
         async function loadVRM() {
             if (isModelLoading) return;
@@ -222,6 +289,7 @@
             
             const statusEl = document.getElementById('status');
             const errorEl = document.getElementById('error-message');
+            const modelInfoEl = document.getElementById('model-info');
             
             statusEl.textContent = 'Memuat avatar...';
             errorEl.style.display = 'none';
@@ -229,16 +297,25 @@
             // Gunakan GLTFLoader untuk memuat file VRM
             const loader = new GLTFLoader();
             
-            // Daftarkan plugin VRM
+            // Daftarkan plugin VRM dengan konfigurasi untuk menghindari error UV animation
             loader.register(parser => {
-                return new VRMLoaderPlugin(parser);
+                return new VRMLoaderPlugin(parser, {
+                    helperRoot: scene,
+                    autoUpdateHumanBones: true,
+                    // Nonaktifkan fitur yang bermasalah
+                    materialLoaderOptions: {
+                        ignoreMToonOpacity: true,
+                        ignoreTextureAlpha: false
+                    }
+                });
             });
             
             try {
                 // Path ke file VRM lokal
-                const modelUrl = 'model/model.vrm'; // Sesuaikan dengan path file Anda
+                const modelUrl = 'model/model.vrm';
                 
                 console.log('Mencoba memuat model dari:', modelUrl);
+                modelInfoEl.textContent = 'Loading: ' + modelUrl;
                 
                 // Load model
                 const gltf = await loader.loadAsync(modelUrl);
@@ -250,6 +327,16 @@
                     throw new Error('File bukan format VRM yang valid');
                 }
                 
+                // Hapus UV Animation yang bermasalah
+                if (vrm.materials) {
+                    vrm.materials.forEach(material => {
+                        if (material && material._updateUVAnimation) {
+                            // Override method yang bermasalah
+                            material._updateUVAnimation = () => {};
+                        }
+                    });
+                }
+                
                 // Rotasi model agar berdiri tegak
                 VRMUtils.rotateVRM0(vrm);
                 
@@ -257,86 +344,153 @@
                 scene.add(vrm.scene);
                 currentVRM = vrm;
                 
-                // Setup animations
-                setupAnimations(vrm);
-                
-                console.log('VRM model berhasil dimuat');
-                statusEl.textContent = 'Avatar siap!';
-                
                 // Update shadow
                 vrm.scene.traverse((obj) => {
                     if (obj.isMesh) {
                         obj.castShadow = true;
                         obj.receiveShadow = true;
+                        
+                        // Fix material issues
+                        if (obj.material) {
+                            if (Array.isArray(obj.material)) {
+                                obj.material.forEach(mat => {
+                                    if (mat) {
+                                        mat.transparent = false;
+                                        mat.depthWrite = true;
+                                    }
+                                });
+                            } else {
+                                obj.material.transparent = false;
+                                obj.material.depthWrite = true;
+                            }
+                        }
                     }
                 });
+                
+                console.log('VRM model berhasil dimuat');
+                statusEl.textContent = 'Avatar siap!';
+                modelInfoEl.textContent = 'Model: ' + (vrm.meta?.title || 'Unknown') + ' by ' + (vrm.meta?.author || 'Unknown');
+                
+                // Setup idle animation
+                setupIdleAnimation();
                 
             } catch (error) {
                 console.error('Error loading VRM:', error);
                 statusEl.textContent = 'Gagal memuat avatar';
                 errorEl.style.display = 'block';
                 errorEl.textContent = 'Error: ' + error.message + '. Pastikan file model.vrm ada di folder model/';
+                modelInfoEl.textContent = 'Error loading model';
             } finally {
                 isModelLoading = false;
             }
         }
         
-        // Setup animations
-        function setupAnimations(vrm) {
-            // Simple idle animation
-            const idleAnimation = () => {
-                if (!vrm) return;
+        // Setup idle animation
+        function setupIdleAnimation() {
+            if (!currentVRM) return;
+            
+            let time = 0;
+            
+            idleAnimation = () => {
+                if (!currentVRM) return;
                 
-                const time = Date.now() / 1000;
+                time += 0.01;
                 
-                // Slight body sway
-                if (vrm.humanoid) {
-                    const hips = vrm.humanoid.getNormalizedBoneNode('hips');
-                    if (hips) {
-                        hips.rotation.y = Math.sin(time * 0.5) * 0.02;
-                    }
-                    
-                    // Small breathing motion
-                    const chest = vrm.humanoid.getNormalizedBoneNode('chest');
-                    if (chest) {
-                        chest.position.y = Math.sin(time * 2) * 0.01;
+                // Gentle swaying animation
+                if (currentVRM.humanoid) {
+                    try {
+                        const hips = currentVRM.humanoid.getNormalizedBoneNode('hips');
+                        if (hips) {
+                            hips.rotation.y = Math.sin(time * 0.5) * 0.02;
+                        }
+                        
+                        const chest = currentVRM.humanoid.getNormalizedBoneNode('chest');
+                        if (chest) {
+                            chest.rotation.x = Math.sin(time * 0.8) * 0.01;
+                            chest.rotation.z = Math.sin(time * 0.6) * 0.01;
+                        }
+                        
+                        const head = currentVRM.humanoid.getNormalizedBoneNode('head');
+                        if (head) {
+                            head.rotation.x = Math.sin(time * 0.3) * 0.01;
+                            head.rotation.y = Math.sin(time * 0.2) * 0.02;
+                        }
+                        
+                        // Slight breathing
+                        const spine = currentVRM.humanoid.getNormalizedBoneNode('spine');
+                        if (spine) {
+                            spine.position.y = Math.sin(time * 2) * 0.005;
+                        }
+                    } catch (e) {
+                        console.warn('Animation error:', e);
                     }
                 }
             };
-            
-            // Add to animation loop
-            mixer = { update: idleAnimation };
         }
         
-        // Animation functions
+        // Talking animation
         function startTalking() {
             if (!currentVRM || !currentVRM.humanoid) return;
             
-            // Simple talking animation
-            const mouth = currentVRM.humanoid.getNormalizedBoneNode('jaw');
-            if (mouth) {
-                mouth.rotation.x = 0.2;
+            let jawTime = 0;
+            
+            // Clear existing animation
+            if (talkingAnimation) {
+                cancelAnimationFrame(talkingAnimation);
             }
+            
+            const animateJaw = () => {
+                if (!currentVRM) return;
+                
+                try {
+                    const jaw = currentVRM.humanoid.getNormalizedBoneNode('jaw');
+                    if (jaw) {
+                        jawTime += 0.3;
+                        // Simulate talking with jaw movement
+                        jaw.rotation.x = 0.1 + Math.sin(jawTime) * 0.1;
+                    }
+                } catch (e) {
+                    console.warn('Jaw animation error:', e);
+                }
+                
+                talkingAnimation = requestAnimationFrame(animateJaw);
+            };
+            
+            animateJaw();
         }
         
         function stopTalking() {
+            if (talkingAnimation) {
+                cancelAnimationFrame(talkingAnimation);
+                talkingAnimation = null;
+            }
+            
             if (!currentVRM || !currentVRM.humanoid) return;
             
-            const mouth = currentVRM.humanoid.getNormalizedBoneNode('jaw');
-            if (mouth) {
-                mouth.rotation.x = 0;
+            try {
+                const jaw = currentVRM.humanoid.getNormalizedBoneNode('jaw');
+                if (jaw) {
+                    jaw.rotation.x = 0;
+                }
+            } catch (e) {
+                console.warn('Error resetting jaw:', e);
             }
         }
         
         function nodHead() {
             if (!currentVRM || !currentVRM.humanoid) return;
             
-            const head = currentVRM.humanoid.getNormalizedBoneNode('head');
-            if (head) {
-                head.rotation.x = -0.2;
-                setTimeout(() => {
-                    if (head) head.rotation.x = 0;
-                }, 500);
+            try {
+                const head = currentVRM.humanoid.getNormalizedBoneNode('head');
+                if (head) {
+                    // Quick nod
+                    head.rotation.x = -0.2;
+                    setTimeout(() => {
+                        if (head) head.rotation.x = 0;
+                    }, 300);
+                }
+            } catch (e) {
+                console.warn('Nod animation error:', e);
             }
         }
         
@@ -387,7 +541,7 @@
                 loadingEl.style.display = 'none';
                 sendBtn.disabled = false;
                 stopTalking();
-                nodHead(); // Nod after responding
+                nodHead();
             }
         }
         
@@ -427,11 +581,19 @@
             const delta = clock.getDelta();
             
             if (currentVRM) {
-                currentVRM.update(delta);
+                try {
+                    // Update VRM with error handling
+                    currentVRM.update(delta);
+                } catch (e) {
+                    // Ignore UV animation errors
+                    if (!e.message.includes('UVAnimation')) {
+                        console.warn('VRM update error:', e);
+                    }
+                }
             }
             
-            if (mixer) {
-                mixer.update();
+            if (idleAnimation) {
+                idleAnimation();
             }
             
             controls.update();
@@ -453,6 +615,9 @@
         // Export functions to global scope
         window.sendMessage = sendMessage;
         window.handleKeyPress = handleKeyPress;
+        
+        // Add visual feedback for model loading
+        console.log('Aplikasi siap. Menunggu model VRM...');
     </script>
 </body>
 </html>
