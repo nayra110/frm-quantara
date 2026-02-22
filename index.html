@@ -53,7 +53,7 @@
     loader.register((parser) => new VRMLoaderPlugin(parser));
 
     loader.load(
-        './model.vrm', // GANTI DENGAN NAMA FILE KAMU
+        'model/model.vrm', // GANTI DENGAN NAMA FILE KAMU
         (gltf) => {
             const vrm = gltf.userData.vrm;
             scene.add(vrm.scene);
