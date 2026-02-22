@@ -2,13 +2,30 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <title>VRM Web Viewer - Fixed Physics</title>
+    <title>VRM Web Viewer - Interactive</title>
     <style>
-        body { margin: 0; background-color: #1a1a1a; overflow: hidden; }
+        body { margin: 0; background-color: #222; overflow: hidden; }
         canvas { display: block; }
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            font-family: sans-serif;
+            pointer-events: none;
+            background: rgba(0,0,0,0.5);
+            padding: 10px;
+            border-radius: 5px;
+        }
     </style>
 </head>
 <body>
+
+<div id="info">
+    <b>VRoid Live Viewer</b><br>
+    - Mouse: Putar Kamera<br>
+    - Scroll: Zoom
+</div>
 
 <script type="importmap">
   {
@@ -26,93 +43,107 @@
     import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
     import { VRMLoaderPlugin } from '@pixiv/three-vrm';
 
-    // --- SETUP ---
-    const scene = new THREE.Scene();
+    // Global variables
+    let currentVrm = null;
     const clock = new THREE.Clock();
-    
-    const camera = new THREE.PerspectiveCamera(35, window.innerWidth / window.innerHeight, 0.1, 20.0);
-    camera.position.set(0, 1.4, 3.0);
 
+    // --- 1. SETUP SCENE ---
+    const scene = new THREE.Scene();
+    
+    // Kamera
+    const camera = new THREE.PerspectiveCamera(35, window.innerWidth / window.innerHeight, 0.1, 20.0);
+    camera.position.set(0, 1.4, 3.5);
+
+    // Renderer
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(window.devicePixelRatio);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     document.body.appendChild(renderer.domElement);
 
-    const light = new THREE.DirectionalLight(0xffffff, 1.0);
-    light.position.set(1, 1, 1).normalize();
-    scene.add(light);
-    scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+    // --- 2. LIGHTING (Pencahayaan) ---
+    const sunLight = new THREE.DirectionalLight(0xffffff, 1.5);
+    sunLight.position.set(1, 2, 3);
+    scene.add(sunLight);
 
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+    scene.add(ambientLight);
+
+    // --- 3. CONTROLS ---
     const controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true; 
-    controls.target.set(0, 1.3, 0);
+    controls.target.set(0, 1.3, 0); // Fokus ke area wajah
+    controls.enableDamping = true;
+    controls.update();
 
-    // --- VRM LOAD ---
-    let currentVrm = null;
+    // --- 4. LOAD VRM MODEL ---
     const loader = new GLTFLoader();
     
+    // Install VRM Plugin
     loader.register((parser) => {
-        // Tambahkan helper manual agar spring bone selalu sinkron
-        return new VRMLoaderPlugin(parser, { autoUpdateHumanBones: true });
+        return new VRMLoaderPlugin(parser);
     });
 
     loader.load(
-        'model/model.vrm', // Ganti dengan file kamu
+        'model/model.vrm', // GANTI SESUAI NAMA FILE KAMU
         (gltf) => {
             const vrm = gltf.userData.vrm;
             currentVrm = vrm;
+
+            // Tambahkan model ke scene
             scene.add(vrm.scene);
-            vrm.scene.rotation.y = Math.PI; 
-            
-            // Set target mata ke kamera
+
+            // VRM secara default menghadap -Z, kita putar agar menghadap kamera (+Z)
+            vrm.scene.rotation.y = Math.PI;
+
+            // Setup LookAt agar mata mengikuti kamera
             vrm.lookAt.target = camera;
 
-            console.log("Model loaded!");
-        }
+            console.log("Model Berhasil Dimuat!", vrm);
+        },
+        (progress) => {
+            console.log('Loading...', Math.round((progress.loaded / progress.total) * 100) + '%');
+        },
+        (error) => console.error('Error saat memuat model:', error)
     );
 
-    // --- LOGIKA BERKEDIP (Blink) ---
-    let blinkTimer = 0;
-    function updateBlink(vrm, delta) {
-        blinkTimer += delta;
-        if (blinkTimer > 4.0) { // Berkedip setiap 4 detik
-            const s = Math.sin(blinkTimer * 10.0); // Kecepatan kedipan
-            const blinkValue = Math.max(0, s);
-            vrm.expressionManager.setValue('blink', blinkValue);
-            if (blinkTimer > 4.2) blinkTimer = 0;
-        }
-    }
-
-    // --- ANIMATION LOOP ---
+    // --- 5. ANIMATION LOOP ---
     function animate() {
         requestAnimationFrame(animate);
-        const delta = clock.getDelta();
-        const elapsed = clock.getElapsedTime();
+
+        const deltaTime = clock.getDelta();
+        const elapsedTime = clock.getElapsedTime();
 
         if (currentVrm) {
-            // TRIK PHYSICS: Berikan sedikit rotasi halus terus menerus
-            // Ini memicu SpringBone agar selalu menghitung pergerakan rambut/rok
-            currentVrm.scene.rotation.y = Math.PI + (Math.sin(elapsed * 0.5) * 0.02);
-            
-            // Update kedipan mata
-            updateBlink(currentVrm, delta);
+            // A. Gerakan Rambut & Baju (Spring Bone)
+            currentVrm.springBoneManager.update(deltaTime);
 
-            // PENTING: Update semua sistem VRM
-            currentVrm.update(delta);
+            // B. Mata Mengikuti Kamera (LookAt)
+            currentVrm.lookAt.update(deltaTime);
+
+            // C. Kedip Otomatis (Auto Blink)
+            // Karakter akan berkedip setiap beberapa detik menggunakan sin wave
+            const blinkStrength = Math.sin(elapsedTime * 2); 
+            // Jika nilai sin sangat tinggi (mendekati 1), karakter tutup mata
+            const isBlinking = blinkStrength > 0.97; 
+            
+            currentVrm.expressionManager.setValue('blink', isBlinking ? 1.0 : 0.0);
+            
+            // D. Update Ekspresi
+            currentVrm.expressionManager.update();
         }
 
         controls.update();
         renderer.render(scene, camera);
     }
 
-    animate();
-
+    // Handle Window Resize
     window.addEventListener('resize', () => {
         camera.aspect = window.innerWidth / window.innerHeight;
         camera.updateProjectionMatrix();
         renderer.setSize(window.innerWidth, window.innerHeight);
     });
+
+    animate();
 </script>
 </body>
 </html>
