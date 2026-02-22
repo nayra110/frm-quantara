@@ -2,15 +2,13 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <title>VRM Web Viewer - Eye & Physics</title>
+    <title>VRM Web Viewer - Fixed Physics</title>
     <style>
-        body { margin: 0; background-color: #1a1a1a; overflow: hidden; font-family: sans-serif; }
+        body { margin: 0; background-color: #1a1a1a; overflow: hidden; }
         canvas { display: block; }
-        #info { position: absolute; top: 10px; left: 10px; color: white; pointer-events: none; }
     </style>
 </head>
 <body>
-<div id="info">Gunakan Mouse untuk Putar Kamera (Physics & Eye Tracking Aktif)</div>
 
 <script type="importmap">
   {
@@ -28,12 +26,12 @@
     import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
     import { VRMLoaderPlugin } from '@pixiv/three-vrm';
 
-    // --- 1. SETUP SCENE & RENDERER ---
+    // --- SETUP ---
     const scene = new THREE.Scene();
     const clock = new THREE.Clock();
     
     const camera = new THREE.PerspectiveCamera(35, window.innerWidth / window.innerHeight, 0.1, 20.0);
-    camera.position.set(0, 1.4, 3.5);
+    camera.position.set(0, 1.4, 3.0);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -41,78 +39,80 @@
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     document.body.appendChild(renderer.domElement);
 
-    // --- 2. LIGHTING (Agar tekstur VRoid terlihat cerah) ---
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
-    scene.add(ambientLight);
+    const light = new THREE.DirectionalLight(0xffffff, 1.0);
+    light.position.set(1, 1, 1).normalize();
+    scene.add(light);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.6));
 
-    const dirLight = new THREE.DirectionalLight(0xffffff, 1.0);
-    dirLight.position.set(1, 1, 1).normalize();
-    scene.add(dirLight);
-
-    // --- 3. CONTROLS ---
     const controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true; // Membuat putaran kamera lebih halus
-    controls.dampingFactor = 0.05;
+    controls.enableDamping = true; 
     controls.target.set(0, 1.3, 0);
 
-    // --- 4. LOAD VRM MODEL ---
+    // --- VRM LOAD ---
     let currentVrm = null;
     const loader = new GLTFLoader();
     
-    // Registrasi Plugin VRM
     loader.register((parser) => {
-        return new VRMLoaderPlugin(parser);
+        // Tambahkan helper manual agar spring bone selalu sinkron
+        return new VRMLoaderPlugin(parser, { autoUpdateHumanBones: true });
     });
 
     loader.load(
-        'model/model.vrm', // GANTI DENGAN PATH FILE KAMU
+        'model/model.vrm', // Ganti dengan file kamu
         (gltf) => {
             const vrm = gltf.userData.vrm;
             currentVrm = vrm;
-            
-            // Tambahkan model ke scene
             scene.add(vrm.scene);
-
-            // 1. AKTIFKAN EYE TRACKING
+            vrm.scene.rotation.y = Math.PI; 
+            
+            // Set target mata ke kamera
             vrm.lookAt.target = camera;
 
-            // 2. HADAPKAN KE DEPAN (Karena default VRM biasanya membelakangi kamera)
-            vrm.scene.rotation.y = Math.PI; 
-
-            console.log("VRM Model Loaded!", vrm);
-        },
-        (progress) => console.log('Loading...', (progress.loaded / progress.total * 100) + '%'),
-        (error) => console.error('Gagal memuat model:', error)
+            console.log("Model loaded!");
+        }
     );
 
-    // --- 5. ANIMATION LOOP ---
+    // --- LOGIKA BERKEDIP (Blink) ---
+    let blinkTimer = 0;
+    function updateBlink(vrm, delta) {
+        blinkTimer += delta;
+        if (blinkTimer > 4.0) { // Berkedip setiap 4 detik
+            const s = Math.sin(blinkTimer * 10.0); // Kecepatan kedipan
+            const blinkValue = Math.max(0, s);
+            vrm.expressionManager.setValue('blink', blinkValue);
+            if (blinkTimer > 4.2) blinkTimer = 0;
+        }
+    }
+
+    // --- ANIMATION LOOP ---
     function animate() {
         requestAnimationFrame(animate);
-
-        const deltaTime = clock.getDelta();
-        const elapsedTime = clock.getElapsedTime();
+        const delta = clock.getDelta();
+        const elapsed = clock.getElapsedTime();
 
         if (currentVrm) {
-            // Memberikan sedikit goyangan 'idle' agar rambut/rok tidak kaku
-            // Math.sin memberikan gerakan ayunan halus secara otomatis
-            currentVrm.scene.position.y = Math.sin(elapsedTime * 0.5) * 0.005;
+            // TRIK PHYSICS: Berikan sedikit rotasi halus terus menerus
+            // Ini memicu SpringBone agar selalu menghitung pergerakan rambut/rok
+            currentVrm.scene.rotation.y = Math.PI + (Math.sin(elapsed * 0.5) * 0.02);
+            
+            // Update kedipan mata
+            updateBlink(currentVrm, delta);
 
-            // PENTING: Update semua state VRM (Physics, Mata, Ekspresi)
-            currentVrm.update(deltaTime);
+            // PENTING: Update semua sistem VRM
+            currentVrm.update(delta);
         }
 
         controls.update();
         renderer.render(scene, camera);
     }
 
-    // --- 6. HANDLE WINDOW RESIZE ---
+    animate();
+
     window.addEventListener('resize', () => {
         camera.aspect = window.innerWidth / window.innerHeight;
         camera.updateProjectionMatrix();
         renderer.setSize(window.innerWidth, window.innerHeight);
     });
-
-    animate();
 </script>
 </body>
 </html>
