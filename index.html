@@ -197,10 +197,10 @@
         import * as THREE from 'three';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
         import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-        import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
+        import * as VRM from '@pixiv/three-vrm';
 
         // Konfigurasi
-        const GROQ_API_KEY = 'YOUR_GROQ_API_KEY'; // Ganti dengan API key Anda
+        const GROQ_API_KEY = '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'; // Ganti dengan API key Anda
         const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
         
         // State
@@ -297,16 +297,11 @@
             // Gunakan GLTFLoader untuk memuat file VRM
             const loader = new GLTFLoader();
             
-            // Daftarkan plugin VRM dengan konfigurasi untuk menghindari error UV animation
-            loader.register(parser => {
-                return new VRMLoaderPlugin(parser, {
+            // Daftarkan plugin VRM dengan cara yang benar
+            loader.register((parser) => {
+                return new VRM.VRMLoaderPlugin(parser, {
                     helperRoot: scene,
-                    autoUpdateHumanBones: true,
-                    // Nonaktifkan fitur yang bermasalah
-                    materialLoaderOptions: {
-                        ignoreMToonOpacity: true,
-                        ignoreTextureAlpha: false
-                    }
+                    autoUpdateHumanBones: true
                 });
             });
             
@@ -327,18 +322,8 @@
                     throw new Error('File bukan format VRM yang valid');
                 }
                 
-                // Hapus UV Animation yang bermasalah
-                if (vrm.materials) {
-                    vrm.materials.forEach(material => {
-                        if (material && material._updateUVAnimation) {
-                            // Override method yang bermasalah
-                            material._updateUVAnimation = () => {};
-                        }
-                    });
-                }
-                
                 // Rotasi model agar berdiri tegak
-                VRMUtils.rotateVRM0(vrm);
+                VRM.VRMUtils.rotateVRM0(vrm);
                 
                 // Setup scene
                 scene.add(vrm.scene);
@@ -349,21 +334,6 @@
                     if (obj.isMesh) {
                         obj.castShadow = true;
                         obj.receiveShadow = true;
-                        
-                        // Fix material issues
-                        if (obj.material) {
-                            if (Array.isArray(obj.material)) {
-                                obj.material.forEach(mat => {
-                                    if (mat) {
-                                        mat.transparent = false;
-                                        mat.depthWrite = true;
-                                    }
-                                });
-                            } else {
-                                obj.material.transparent = false;
-                                obj.material.depthWrite = true;
-                            }
-                        }
                     }
                 });
                 
@@ -415,14 +385,8 @@
                             head.rotation.x = Math.sin(time * 0.3) * 0.01;
                             head.rotation.y = Math.sin(time * 0.2) * 0.02;
                         }
-                        
-                        // Slight breathing
-                        const spine = currentVRM.humanoid.getNormalizedBoneNode('spine');
-                        if (spine) {
-                            spine.position.y = Math.sin(time * 2) * 0.005;
-                        }
                     } catch (e) {
-                        console.warn('Animation error:', e);
+                        // Ignore animation errors
                     }
                 }
             };
@@ -446,11 +410,10 @@
                     const jaw = currentVRM.humanoid.getNormalizedBoneNode('jaw');
                     if (jaw) {
                         jawTime += 0.3;
-                        // Simulate talking with jaw movement
                         jaw.rotation.x = 0.1 + Math.sin(jawTime) * 0.1;
                     }
                 } catch (e) {
-                    console.warn('Jaw animation error:', e);
+                    // Ignore jaw animation errors
                 }
                 
                 talkingAnimation = requestAnimationFrame(animateJaw);
@@ -473,7 +436,7 @@
                     jaw.rotation.x = 0;
                 }
             } catch (e) {
-                console.warn('Error resetting jaw:', e);
+                // Ignore errors
             }
         }
         
@@ -483,14 +446,13 @@
             try {
                 const head = currentVRM.humanoid.getNormalizedBoneNode('head');
                 if (head) {
-                    // Quick nod
                     head.rotation.x = -0.2;
                     setTimeout(() => {
                         if (head) head.rotation.x = 0;
                     }, 300);
                 }
             } catch (e) {
-                console.warn('Nod animation error:', e);
+                // Ignore errors
             }
         }
         
@@ -582,13 +544,9 @@
             
             if (currentVRM) {
                 try {
-                    // Update VRM with error handling
                     currentVRM.update(delta);
                 } catch (e) {
-                    // Ignore UV animation errors
-                    if (!e.message.includes('UVAnimation')) {
-                        console.warn('VRM update error:', e);
-                    }
+                    // Ignore animation errors
                 }
             }
             
@@ -616,7 +574,6 @@
         window.sendMessage = sendMessage;
         window.handleKeyPress = handleKeyPress;
         
-        // Add visual feedback for model loading
         console.log('Aplikasi siap. Menunggu model VRM...');
     </script>
 </body>
