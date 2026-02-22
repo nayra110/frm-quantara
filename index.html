@@ -2,30 +2,13 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <title>VRM Web Viewer - Interactive</title>
+    <title>VRM Web Viewer - Eye Tracking & Auto Blink</title>
     <style>
-        body { margin: 0; background-color: #222; overflow: hidden; }
+        body { margin: 0; background-color: #eee; overflow: hidden; }
         canvas { display: block; }
-        #info {
-            position: absolute;
-            top: 10px;
-            left: 10px;
-            color: white;
-            font-family: sans-serif;
-            pointer-events: none;
-            background: rgba(0,0,0,0.5);
-            padding: 10px;
-            border-radius: 5px;
-        }
     </style>
 </head>
 <body>
-
-<div id="info">
-    <b>VRoid Live Viewer</b><br>
-    - Mouse: Putar Kamera<br>
-    - Scroll: Zoom
-</div>
 
 <script type="importmap">
   {
@@ -43,100 +26,105 @@
     import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
     import { VRMLoaderPlugin } from '@pixiv/three-vrm';
 
-    // Global variables
-    let currentVrm = null;
-    const clock = new THREE.Clock();
-
-    // --- 1. SETUP SCENE ---
+    // --- 1. Setup Scene ---
     const scene = new THREE.Scene();
-    
-    // Kamera
-    const camera = new THREE.PerspectiveCamera(35, window.innerWidth / window.innerHeight, 0.1, 20.0);
-    camera.position.set(0, 1.4, 3.5);
+    const clock = new THREE.Clock();
+    let currentVrm = null;
 
-    // Renderer
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 20.0);
+    camera.position.set(0, 1.4, 1.5); // Posisi lebih dekat ke wajah
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(window.devicePixelRatio);
-    renderer.outputColorSpace = THREE.SRGBColorSpace;
     document.body.appendChild(renderer.domElement);
 
-    // --- 2. LIGHTING (Pencahayaan) ---
-    const sunLight = new THREE.DirectionalLight(0xffffff, 1.5);
-    sunLight.position.set(1, 2, 3);
-    scene.add(sunLight);
-
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+    // --- 2. Pencahayaan ---
+    const light = new THREE.DirectionalLight(0xffffff, 1.0);
+    light.position.set(1, 1, 1).normalize();
+    scene.add(light);
+    
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
     scene.add(ambientLight);
 
-    // --- 3. CONTROLS ---
+    // --- 3. Kontrol Kamera ---
     const controls = new OrbitControls(camera, renderer.domElement);
-    controls.target.set(0, 1.3, 0); // Fokus ke area wajah
-    controls.enableDamping = true;
+    controls.target.set(0, 1.3, 0);
     controls.update();
 
-    // --- 4. LOAD VRM MODEL ---
+    // --- 4. Load Model .vrm ---
     const loader = new GLTFLoader();
-    
-    // Install VRM Plugin
-    loader.register((parser) => {
-        return new VRMLoaderPlugin(parser);
-    });
+    loader.register((parser) => new VRMLoaderPlugin(parser));
 
     loader.load(
-        'model/model.vrm', // GANTI SESUAI NAMA FILE KAMU
+        'model/model.vrm', // PASTIKAN FILE INI ADA DI FOLDER YANG BENAR
         (gltf) => {
             const vrm = gltf.userData.vrm;
             currentVrm = vrm;
+            
+            // Nonaktifkan frustum culling agar model tidak hilang saat zoom in
+            vrm.scene.traverse((obj) => { obj.frustumCulled = false; });
 
-            // Tambahkan model ke scene
             scene.add(vrm.scene);
 
-            // VRM secara default menghadap -Z, kita putar agar menghadap kamera (+Z)
-            vrm.scene.rotation.y = Math.PI;
-
-            // Setup LookAt agar mata mengikuti kamera
+            // FITUR 1: Mata mengikuti kamera
             vrm.lookAt.target = camera;
 
-            console.log("Model Berhasil Dimuat!", vrm);
+            console.log("Model berhasil dimuat!", vrm);
         },
-        (progress) => {
-            console.log('Loading...', Math.round((progress.loaded / progress.total) * 100) + '%');
-        },
-        (error) => console.error('Error saat memuat model:', error)
+        (progress) => console.log('Loading...', (progress.loaded / progress.total * 100) + '%'),
+        (error) => console.error('Terjadi kesalahan:', error)
     );
 
-    // --- 5. ANIMATION LOOP ---
+    // --- 5. Logika Kedip Lembut (Blinking) ---
+    let blinkTimer = 0;
+    let isBlinking = false;
+
+    function updateBlinking(vrm, delta) {
+        blinkTimer += delta;
+
+        // Karakter akan kedip setiap 3 detik secara rata-rata
+        if (blinkTimer > 3.0 && !isBlinking) {
+            isBlinking = true;
+            blinkTimer = 0;
+        }
+
+        if (isBlinking) {
+            // Animasi menutup mata (0 ke 1) dan membuka kembali (1 ke 0)
+            // Menggunakan durasi sekitar 0.15 detik untuk kedipan cepat tapi halus
+            const blinkDuration = 0.15;
+            const progress = blinkTimer / blinkDuration;
+
+            if (progress <= 1.0) {
+                // Fase menutup dan membuka (Sine wave sederhana)
+                const value = Math.sin(progress * Math.PI);
+                vrm.expressionManager.setValue('blink', value);
+            } else {
+                vrm.expressionManager.setValue('blink', 0);
+                isBlinking = false;
+                blinkTimer = Math.random() * -2; // Randomize waktu kedip berikutnya (1-3 detik)
+            }
+        }
+    }
+
+    // --- 6. Animasi Loop ---
     function animate() {
         requestAnimationFrame(animate);
 
-        const deltaTime = clock.getDelta();
-        const elapsedTime = clock.getElapsedTime();
+        const delta = clock.getDelta();
 
         if (currentVrm) {
-            // A. Gerakan Rambut & Baju (Spring Bone)
-            currentVrm.springBoneManager.update(deltaTime);
+            // Update VRM (Internal clock untuk LookAt dan SpringBone)
+            currentVrm.update(delta);
 
-            // B. Mata Mengikuti Kamera (LookAt)
-            currentVrm.lookAt.update(deltaTime);
-
-            // C. Kedip Otomatis (Auto Blink)
-            // Karakter akan berkedip setiap beberapa detik menggunakan sin wave
-            const blinkStrength = Math.sin(elapsedTime * 2); 
-            // Jika nilai sin sangat tinggi (mendekati 1), karakter tutup mata
-            const isBlinking = blinkStrength > 0.97; 
-            
-            currentVrm.expressionManager.setValue('blink', isBlinking ? 1.0 : 0.0);
-            
-            // D. Update Ekspresi
-            currentVrm.expressionManager.update();
+            // Update Fitur Kedip
+            updateBlinking(currentVrm, delta);
         }
 
-        controls.update();
         renderer.render(scene, camera);
     }
 
-    // Handle Window Resize
+    // Handle Resize
     window.addEventListener('resize', () => {
         camera.aspect = window.innerWidth / window.innerHeight;
         camera.updateProjectionMatrix();
