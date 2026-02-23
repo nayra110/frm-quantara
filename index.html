@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <title>VRM + Mixamo Animation</title>
+    <title>VRM + Mixamo Fixed</title>
     <style>
         body { margin: 0; background-color: #eee; overflow: hidden; }
         canvas { display: block; }
@@ -26,7 +26,7 @@
     import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
     import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
 
-    // --- 1. Setup ---
+    // --- 1. Setup Scene ---
     const scene = new THREE.Scene();
     const clock = new THREE.Clock();
     let currentVrm = null;
@@ -38,6 +38,8 @@
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(window.devicePixelRatio);
+    // Mengatasi warning "encodings_fragment"
+    renderer.outputColorSpace = THREE.SRGBColorSpace; 
     document.body.appendChild(renderer.domElement);
 
     const light = new THREE.DirectionalLight(0xffffff, 1.0);
@@ -49,35 +51,45 @@
     controls.target.set(0, 1.1, 0);
     controls.update();
 
-    // --- 2. Fungsi Load Animasi Mixamo ---
-    // Tips: Ekspor animasi Mixamo ke .glb agar lebih ringan dibaca Three.js
+    // --- 2. Fungsi Load Animasi Mixamo yang Diperbaiki ---
     function loadMixamoAnimation(url, vrm) {
         const loader = new GLTFLoader();
         loader.load(url, (gltf) => {
-            const clip = gltf.animations[0]; // Ambil animasi pertama
-
-            // Retargeting: Hubungkan animasi Mixamo ke tulang VRM
-            // Kita menggunakan Helper dari three-vrm untuk mapping tulang otomatis
+            const clip = gltf.animations[0];
             mixer = new THREE.AnimationMixer(vrm.scene);
-            
-            // VRM Humanoid bones mapping
-            const trackNameMap = {};
-            vrm.humanoid.getRawBoneNodeMap(); // Ambil list tulang
-            
-            // Kita perlu mengubah nama track agar sesuai dengan struktur VRM
+
+            // Perbaikan Mapping Tulang:
+            // Mixamo menggunakan nama seperti "mixamorigLeftArm"
+            // VRM menggunakan struktur humanoid yang ketat.
+            const tracks = [];
+
             clip.tracks.forEach((track) => {
-                const parts = track.name.split('.');
-                const mixamoBoneName = parts[0];
-                const vrmBoneName = vrm.humanoid.getNormalizedBoneNode(mixamoBoneName.toLowerCase());
+                const trackName = track.name;
+                // Ambil nama tulang dari track (misal: mixamorig_RightArm.quaternion -> RightArm)
+                const boneName = trackName.split('.')[0].replace('mixamorig_', '');
+                const propertyName = trackName.split('.')[1];
+
+                // Cari tulang yang sesuai di VRM
+                // Kita coba cari tulang berdasarkan nama standar (vRoid biasanya pakai nama Inggris)
+                const vrmBone = vrm.humanoid.getBoneNode(boneName.charAt(0).toLowerCase() + boneName.slice(1));
                 
-                if (vrmBoneName) {
-                    trackNameMap[track.name] = `${vrmBoneName.name}.${parts[1]}`;
+                if (vrmBone) {
+                    // Buat track baru dengan nama tulang VRM yang asli
+                    const newTrack = track.clone();
+                    newTrack.name = `${vrmBone.name}.${propertyName}`;
+                    tracks.push(newTrack);
                 }
             });
 
-            const action = mixer.clipAction(clip);
-            action.play();
-            console.log("Animasi Mixamo Berhasil Dijalankan!");
+            if (tracks.length > 0) {
+                const newClip = new THREE.AnimationClip(clip.name, clip.duration, tracks);
+                mixer.clipAction(newClip).play();
+                console.log("Animasi berhasil dipetakan!");
+            } else {
+                // Jika mapping otomatis gagal, mainkan apa adanya (mungkin nama tulang sudah pas)
+                mixer.clipAction(clip).play();
+                console.warn("Mapping otomatis gagal, memainkan animasi default.");
+            }
         });
     }
 
@@ -91,19 +103,18 @@
             const vrm = gltf.userData.vrm;
             currentVrm = vrm;
             
-            // Putar model 180 derajat jika menghadap belakang
             VRMUtils.rotateVRM0(vrm); 
-            
             scene.add(vrm.scene);
             vrm.lookAt.target = camera;
 
-            // Panggil fungsi animasi setelah model dimuat
-            // Ganti 'animations/dance.glb' dengan file animasi Mixamo kamu
+            // Memuat animasi
             loadMixamoAnimation('animations/idle.glb', vrm);
-        }
+        },
+        undefined,
+        (error) => console.error(error)
     );
 
-    // --- 4. Logic Kedip (Sama seperti sebelumnya) ---
+    // --- 4. Logic Kedip ---
     let blinkTimer = 0;
     let isBlinking = false;
     function updateBlinking(vrm, delta) {
@@ -127,10 +138,7 @@
         const delta = clock.getDelta();
 
         if (currentVrm) {
-            // Update Mixer untuk gerakan Mixamo
             if (mixer) mixer.update(delta);
-            
-            // Update VRM untuk LookAt, Blink, dan SpringBone (rambut goyang)
             currentVrm.update(delta);
             updateBlinking(currentVrm, delta);
         }
