@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <title>VRM Web Viewer - Eye Tracking & Auto Blink</title>
+    <title>VRM + Mixamo Animation</title>
     <style>
         body { margin: 0; background-color: #eee; overflow: hidden; }
         canvas { display: block; }
@@ -24,107 +24,120 @@
     import * as THREE from 'three';
     import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
     import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-    import { VRMLoaderPlugin } from '@pixiv/three-vrm';
+    import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
 
-    // --- 1. Setup Scene ---
+    // --- 1. Setup ---
     const scene = new THREE.Scene();
     const clock = new THREE.Clock();
     let currentVrm = null;
+    let mixer = null;
 
     const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 20.0);
-    camera.position.set(0, 1.4, 1.5); // Posisi lebih dekat ke wajah
+    camera.position.set(0, 1.4, 2.0);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(window.devicePixelRatio);
     document.body.appendChild(renderer.domElement);
 
-    // --- 2. Pencahayaan ---
     const light = new THREE.DirectionalLight(0xffffff, 1.0);
     light.position.set(1, 1, 1).normalize();
     scene.add(light);
-    
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
-    scene.add(ambientLight);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.4));
 
-    // --- 3. Kontrol Kamera ---
     const controls = new OrbitControls(camera, renderer.domElement);
-    controls.target.set(0, 1.3, 0);
+    controls.target.set(0, 1.1, 0);
     controls.update();
 
-    // --- 4. Load Model .vrm ---
+    // --- 2. Fungsi Load Animasi Mixamo ---
+    // Tips: Ekspor animasi Mixamo ke .glb agar lebih ringan dibaca Three.js
+    function loadMixamoAnimation(url, vrm) {
+        const loader = new GLTFLoader();
+        loader.load(url, (gltf) => {
+            const clip = gltf.animations[0]; // Ambil animasi pertama
+
+            // Retargeting: Hubungkan animasi Mixamo ke tulang VRM
+            // Kita menggunakan Helper dari three-vrm untuk mapping tulang otomatis
+            mixer = new THREE.AnimationMixer(vrm.scene);
+            
+            // VRM Humanoid bones mapping
+            const trackNameMap = {};
+            vrm.humanoid.getRawBoneNodeMap(); // Ambil list tulang
+            
+            // Kita perlu mengubah nama track agar sesuai dengan struktur VRM
+            clip.tracks.forEach((track) => {
+                const parts = track.name.split('.');
+                const mixamoBoneName = parts[0];
+                const vrmBoneName = vrm.humanoid.getNormalizedBoneNode(mixamoBoneName.toLowerCase());
+                
+                if (vrmBoneName) {
+                    trackNameMap[track.name] = `${vrmBoneName.name}.${parts[1]}`;
+                }
+            });
+
+            const action = mixer.clipAction(clip);
+            action.play();
+            console.log("Animasi Mixamo Berhasil Dijalankan!");
+        });
+    }
+
+    // --- 3. Load Model VRM ---
     const loader = new GLTFLoader();
     loader.register((parser) => new VRMLoaderPlugin(parser));
 
     loader.load(
-        'model/model.vrm', // PASTIKAN FILE INI ADA DI FOLDER YANG BENAR
+        'model/model.vrm', 
         (gltf) => {
             const vrm = gltf.userData.vrm;
             currentVrm = vrm;
             
-            // Nonaktifkan frustum culling agar model tidak hilang saat zoom in
-            vrm.scene.traverse((obj) => { obj.frustumCulled = false; });
-
+            // Putar model 180 derajat jika menghadap belakang
+            VRMUtils.rotateVRM0(vrm); 
+            
             scene.add(vrm.scene);
-
-            // FITUR 1: Mata mengikuti kamera
             vrm.lookAt.target = camera;
 
-            console.log("Model berhasil dimuat!", vrm);
-        },
-        (progress) => console.log('Loading...', (progress.loaded / progress.total * 100) + '%'),
-        (error) => console.error('Terjadi kesalahan:', error)
+            // Panggil fungsi animasi setelah model dimuat
+            // Ganti 'animations/dance.glb' dengan file animasi Mixamo kamu
+            loadMixamoAnimation('animations/idle.glb', vrm);
+        }
     );
 
-    // --- 5. Logika Kedip Lembut (Blinking) ---
+    // --- 4. Logic Kedip (Sama seperti sebelumnya) ---
     let blinkTimer = 0;
     let isBlinking = false;
-
     function updateBlinking(vrm, delta) {
         blinkTimer += delta;
-
-        // Karakter akan kedip setiap 3 detik secara rata-rata
-        if (blinkTimer > 3.0 && !isBlinking) {
-            isBlinking = true;
-            blinkTimer = 0;
-        }
-
+        if (blinkTimer > 3.0 && !isBlinking) { isBlinking = true; blinkTimer = 0; }
         if (isBlinking) {
-            // Animasi menutup mata (0 ke 1) dan membuka kembali (1 ke 0)
-            // Menggunakan durasi sekitar 0.15 detik untuk kedipan cepat tapi halus
-            const blinkDuration = 0.15;
-            const progress = blinkTimer / blinkDuration;
-
+            const progress = blinkTimer / 0.15;
             if (progress <= 1.0) {
-                // Fase menutup dan membuka (Sine wave sederhana)
-                const value = Math.sin(progress * Math.PI);
-                vrm.expressionManager.setValue('blink', value);
+                vrm.expressionManager.setValue('blink', Math.sin(progress * Math.PI));
             } else {
                 vrm.expressionManager.setValue('blink', 0);
                 isBlinking = false;
-                blinkTimer = Math.random() * -2; // Randomize waktu kedip berikutnya (1-3 detik)
+                blinkTimer = Math.random() * -2;
             }
         }
     }
 
-    // --- 6. Animasi Loop ---
+    // --- 5. Animasi Loop ---
     function animate() {
         requestAnimationFrame(animate);
-
         const delta = clock.getDelta();
 
         if (currentVrm) {
-            // Update VRM (Internal clock untuk LookAt dan SpringBone)
+            // Update Mixer untuk gerakan Mixamo
+            if (mixer) mixer.update(delta);
+            
+            // Update VRM untuk LookAt, Blink, dan SpringBone (rambut goyang)
             currentVrm.update(delta);
-
-            // Update Fitur Kedip
             updateBlinking(currentVrm, delta);
         }
 
         renderer.render(scene, camera);
     }
 
-    // Handle Resize
     window.addEventListener('resize', () => {
         camera.aspect = window.innerWidth / window.innerHeight;
         camera.updateProjectionMatrix();
